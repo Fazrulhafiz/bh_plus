@@ -1,0 +1,193 @@
+<?php
+/**
+ * @file bh_plus.module
+ * create on Feb 11, 2015 by Fazrul
+ * for www.bharian.com.my
+ */
+
+//define('WOWWW_VERIFYKEY', 'ae36750f33fafeae0c8913398885384c'); //verify key for mediaprimadigital
+define('WOWWW_VERIFYKEY', '343d491f363a68d99fd39dffe78d4176');
+define('WOWWW_MERCHANTID', 'MPD_Dev');
+define('WOWWW_SUBMERCHANTID', '');
+define('PAYMENT_GATEWAY_URL', 'https://www.onlinepayment.com.my/MOLPay/pay/'.WOWWW_MERCHANTID);
+
+/**
+ * Check for molpay class.
+ */
+function bh_plus_init() {
+  if (module_exists('libraries')) {
+    // Include molpay class.
+    $path = libraries_get_path('molpay');
+    if ($path) {
+      include_once $path . '/molpay.class.php';
+	    }
+  }
+}
+
+/**
+ * Implements custom hook_form_alter().
+ */
+function bh_plus_subs_form($form, &$form_state) {
+	$form = array();
+
+	$form['username'] = array(
+    '#type' => 'textfield', //you can find a list of available types in the form api
+    '#title' => 'Nama pengguna',
+    '#description' => 'Ruang antara huruf dibenarkan, tanda baca yang boleh hanyalah noktah, sengkang, koma bertitik, sengkang bawah.',
+    '#size' => 10,
+    '#maxlength' => 50,
+  );
+
+	$form['email'] = array(
+    '#type' => 'textfield', //you can find a list of available types in the form api
+    '#title' => 'Alamat E-mail',
+    '#description' => 'Alamat e-mel yang sah. Semua e-mel akan dihantar menggunakan alamat e-mel ini.',
+    '#size' => 10,
+    '#maxlength' => 50,
+  );
+
+	$form['subscription'] = array(
+	  '#type' => 'radios',
+	  '#title' => 'Pilih pakej langganan',
+	  '#options' => bh_plus_package(),
+	);
+
+  $form['actions'] = array('#type' => 'actions');
+  $form['actions']['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Langgan sekarang!'),
+  );
+
+  // $form['#validate'] = 'bh_plus_form_validate';
+
+  // $form['#submit'] = 'bh_plus_form_submit';
+
+ 
+  return $form;
+}
+
+function bh_plus_subs_form_validate($form, &$form_state) {
+  if (!($form_state['values']['username'])){
+    form_set_error('username', t('Sila isi nama pengguna anda.'));
+  }
+  if (!($form_state['values']['email'])){
+    form_set_error('email', t('Sila isi alamat email anda.'));
+  }
+  if (!($form_state['values']['subscription'])){
+    form_set_error('subscription', t('Pilih tempoh langganan anda.'));
+  }
+}
+
+function bh_plus_subs_form_submit($form, &$form_state) {
+	drupal_set_message(t('The data is being processed...'));
+
+  $new_user = array(
+    'name' => $form_state['values']['username'], 
+    'pass' => user_password(),
+    'mail' => $form_state['values']['email'],
+    'init' => $form_state['values']['email'], 
+    'status' => 0, 
+    'access' => REQUEST_TIME,
+  	);
+
+  $pack_plus = bh_plus_package_info($form_state['values']['subscription']);
+  $amount = $pack_plus->amount;
+	$order = bh_plus_subscription_count() + 1;
+
+	/*-- db_insert hook to save subscription data --*/
+ //  db_insert('bhplus_subscription')
+ //  ->fields(array(
+ //  	'order_id' => t($order),
+ //  	'user_email' => $form_state['values']['email'],
+ //  	'package' => $pack_plus->packid,
+ //  	))
+ //  ->execute();
+
+	/*-- register new user data --*/
+	// user_save(drupal_anonymous_user(), $new_user);
+
+  $vcode = md5($amount.WOWWW_MERCHANTID.$order.WOWWW_VERIFYKEY);
+  $molpay = new molpay(WOWWW_MERCHANTID);
+  $molpay->setMerchantKey(WOWWW_VERIFYKEY);
+  $molpay->setField('orderid', $order);
+  $molpay->setField('amount', $amount);
+  $molpay->setField('cur', 'MYR');
+  $molpay->setField('bill_desc', '');
+  $molpay->setField('bill_name', $form_state['values']['username']);
+  $molpay->setField('bill_email', $form_state['values']['email']);
+  $molpay->setField('returnurl', $settings['return']);
+  $molpay->setField('vcode', $vcode);
+
+  // For MOLPay account with a sub merchant account
+  if(WOWWW_SUBMERCHANTID){
+    $xtra = strtolower(str_rot13(base64_encode('1#'.WOWWW_SUBMERCHANTID.':'.$amount)));
+    $molpay->setField('extra', $xtra);
+  }
+
+  $data = $molpay->getFields();
+
+  $payment_url = PAYMENT_GATEWAY_URL;
+
+  // Temporarily store data in session (this is not used for validating payment, just logging)
+  drupal_session_start();
+  unset($_SESSION['bh_plus']['orders']);  // Unset all previous orders from session.
+  $_SESSION['bh_plus']['orders'][$order] = serialize($data);
+
+  $form['redirect'] = array(
+    '#markup' => '<br />' . t('<p>You are being redirected to molpay payment page. If not, click on the button below.</p>'),
+  );
+
+  $form['#action'] = $payment_url;
+
+  foreach ($data as $name => $value) {
+    if (!empty($value)) {
+        $form[$name] = array('#type' => 'hidden', '#value' => $value);
+    }
+  }
+
+  $commerce_molpay_nid = db_insert('commerce_molpay')
+    ->fields(array(
+      'orderid' => $order,
+      'amount' => $amount,
+      'cur' => 'MYR',
+      'country' => "MY",
+      'bill_desc' => substr(variable_get('site_name', 'BH Plus') . ' - Order no ' . $order, 0, 100),
+      'bill_name' => $form_state['values']['username'],
+      'bill_email' => $form_state['values']['email'],
+    ))
+    ->execute();
+
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Proceed to MOLPay'),
+  );
+
+  return $form;
+}
+
+function bh_plus_package($status = TRUE) {
+	$packages = array();
+  $result = db_query("SELECT * FROM {bhplus_package} WHERE status = :status", array(':status' => $status))->fetchAll();
+
+	foreach ($result as $record) {
+   	$packages[$record->packid] = $record->amount;
+	}
+
+  return $packages;
+}
+
+function bh_plus_package_info($packid) {
+  return db_query("SELECT * FROM {bhplus_package} WHERE packid = :packid", array(':packid' => $packid))->fetch();
+}
+
+function bh_plus_subscription_info() {
+	return db_query("SELECT * FROM {bhplus_subscription}")->fetch();
+}
+
+function bh_plus_subscription_count() {
+	$result = db_query("SELECT order_id FROM {bhplus_subscription}")->fetchAll();
+
+	if (!$result) { $result = 0; }
+
+	return $result;
+}

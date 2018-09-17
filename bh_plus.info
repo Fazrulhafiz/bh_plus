@@ -1,0 +1,7 @@
+name        = BH Plus
+description = BH Plus custom hook and payment gateway.
+package     = BH
+version     = 7.x-1.0
+core        = 7.x
+
+dependencies[] = commerce_molpay
