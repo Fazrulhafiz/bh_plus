@@ -5,9 +5,8 @@
  * for www.bharian.com.my
  */
 
-//define('WOWWW_VERIFYKEY', 'ae36750f33fafeae0c8913398885384c'); //verify key for mediaprimadigital
 define('WOWWW_VERIFYKEY', '343d491f363a68d99fd39dffe78d4176');
-define('WOWWW_MERCHANTID', 'MPD_Dev');
+define('WOWWW_MERCHANTID', '_Dev');
 define('WOWWW_SUBMERCHANTID', '');
 define('PAYMENT_GATEWAY_URL', 'https://www.onlinepayment.com.my/MOLPay/pay/'.WOWWW_MERCHANTID);
 
